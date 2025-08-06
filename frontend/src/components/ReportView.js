@@ -80,7 +80,7 @@ const ReportView = () => {
                 <div className="encounter-header">
                   <div className="encounter-title">{encounter.boss_name}</div>
                   <div className={`encounter-status ${encounter.success ? 'success' : 'wipe'}`}>
-                    {encounter.success ? 'Kill' : 'Wipe'}
+                    {encounter.success ? '✅ Kill' : '❌ Wipe'}
                   </div>
                 </div>
                 <div className="encounter-meta">

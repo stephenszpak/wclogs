@@ -10,7 +10,14 @@ config :wc_logs, WcLogs.Repo,
   pool_size: 10
 
 config :wc_logs, WcLogsWeb.Endpoint,
-  http: [ip: {0, 0, 0, 0}, port: 4001],
+  http: [
+    ip: {0, 0, 0, 0}, 
+    port: 4001,
+    protocol_options: [
+      max_body_length: 1_000_000_000,
+      request_timeout: 120_000
+    ]
+  ],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,

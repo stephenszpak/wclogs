@@ -7,6 +7,7 @@ defmodule WcLogs.Reports.Participant do
     field :name, :string
     field :class, :string
     field :spec, :string
+    field :participant_type, :string, default: "player"
     field :total_damage_done, :integer, default: 0
     field :total_healing_done, :integer, default: 0
     field :total_damage_taken, :integer, default: 0
@@ -23,7 +24,7 @@ defmodule WcLogs.Reports.Participant do
   @doc false
   def changeset(participant, attrs) do
     participant
-    |> cast(attrs, [:guid, :name, :class, :spec, :total_damage_done, :total_healing_done, 
+    |> cast(attrs, [:guid, :name, :class, :spec, :participant_type, :total_damage_done, :total_healing_done, 
                     :total_damage_taken, :dps, :hps, :deaths, :item_level, :encounter_id])
     |> validate_required([:guid, :name, :encounter_id])
   end

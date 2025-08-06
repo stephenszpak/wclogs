@@ -19,6 +19,9 @@ export const reportService = {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      timeout: 300000, // 5 minutes timeout for large files
+      maxContentLength: 1000000000, // 1GB max
+      maxBodyLength: 1000000000, // 1GB max
     });
     
     return response.data;

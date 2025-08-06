@@ -24,22 +24,35 @@ defmodule WcLogsWeb.EncounterJSON do
   end
 
   defp render_participants(participants) when is_list(participants) do
-    damage_dealers = participants
+    # Separate players and bosses
+    {players, bosses} = Enum.split_with(participants, fn p -> 
+      Map.get(p, :participant_type, "player") == "player" 
+    end)
+    
+    # Player damage dealers
+    player_damage_dealers = players
     |> Enum.filter(&(&1.total_damage_done > 0))
     |> Enum.sort_by(&(&1.total_damage_done), :desc)
 
-    healers = participants
+    # Player healers
+    player_healers = players
     |> Enum.filter(&(&1.total_healing_done > 0))
     |> Enum.sort_by(&(&1.total_healing_done), :desc)
+    
+    # Boss damage dealers
+    boss_damage_dealers = bosses
+    |> Enum.filter(&(&1.total_damage_done > 0))
+    |> Enum.sort_by(&(&1.total_damage_done), :desc)
 
     %{
-      damage: Enum.map(damage_dealers, &render_participant/1),
-      healing: Enum.map(healers, &render_participant/1),
-      all: Enum.map(participants, &render_participant/1)
+      damage: Enum.map(player_damage_dealers, &render_participant/1),
+      healing: Enum.map(player_healers, &render_participant/1),
+      all: Enum.map(players, &render_participant/1),
+      bosses: Enum.map(boss_damage_dealers, &render_participant/1)
     }
   end
 
-  defp render_participants(_), do: %{damage: [], healing: [], all: []}
+  defp render_participants(_), do: %{damage: [], healing: [], all: [], bosses: []}
 
   defp render_participant(participant) do
     %{

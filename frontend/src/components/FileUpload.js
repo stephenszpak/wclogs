@@ -49,6 +49,14 @@ const FileUpload = ({ onUploadSuccess }) => {
       return;
     }
 
+    // Check file size (warn if > 100MB)
+    const fileSizeMB = selectedFile.size / 1024 / 1024;
+    if (fileSizeMB > 100) {
+      if (!window.confirm(`This is a large file (${fileSizeMB.toFixed(1)}MB). Upload may take several minutes. Continue?`)) {
+        return;
+      }
+    }
+
     try {
       setUploading(true);
       setError(null);
@@ -68,10 +76,18 @@ const FileUpload = ({ onUploadSuccess }) => {
       
     } catch (err) {
       console.error('Upload error:', err);
-      if (err.response && err.response.data && err.response.data.error) {
-        setError(err.response.data.error);
+      if (err.response) {
+        if (err.response.status === 413) {
+          setError('File is too large. Maximum size is 1GB.');
+        } else if (err.response.data && err.response.data.error) {
+          setError(err.response.data.error);
+        } else {
+          setError(`Upload failed (${err.response.status}). Please try again.`);
+        }
+      } else if (err.code === 'ECONNABORTED') {
+        setError('Upload timed out. The file may be too large or your connection too slow.');
       } else {
-        setError('Failed to upload file. Please try again.');
+        setError('Failed to upload file. Please check your connection and try again.');
       }
     } finally {
       setUploading(false);

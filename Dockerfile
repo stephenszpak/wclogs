@@ -4,7 +4,7 @@
 FROM node:18-alpine AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
-RUN npm ci --only=production
+RUN npm install --only=production
 COPY frontend/ ./
 RUN npm run build
 
@@ -39,8 +39,7 @@ COPY priv priv
 # Copy compiled frontend from previous stage
 COPY --from=frontend-builder /app/frontend/build priv/static
 
-# Compile assets and release
-RUN mix assets.deploy
+# Compile and release
 RUN mix compile
 RUN mix release
 
@@ -52,7 +51,9 @@ RUN apk add --no-cache \
     bash \
     openssl \
     postgresql-client \
-    curl
+    curl \
+    libstdc++ \
+    libgcc
 
 # Create non-root user
 RUN addgroup -g 1000 -S wclogs && \

@@ -11,12 +11,18 @@ defmodule WcLogs.Parser do
   Parses a combat log file and stores the data in the database.
   """
   def parse_file(file_path, filename, uploaded_by \\ "anonymous") do
+    require Logger
+    Logger.info("Starting to parse file: #{filename}, size: #{File.stat!(file_path).size} bytes")
+    
     with {:ok, report} <- create_report(filename, uploaded_by),
          {:ok, parsed_data} <- parse_log_file(file_path),
          {:ok, _encounters} <- store_encounters(report, parsed_data) do
+      Logger.info("Successfully parsed file: #{filename}")
       {:ok, report}
     else
-      error -> error
+      error -> 
+        Logger.error("Failed to parse file: #{filename}, error: #{inspect(error)}")
+        error
     end
   end
 
@@ -28,16 +34,38 @@ defmodule WcLogs.Parser do
   end
 
   defp parse_log_file(file_path) do
+    require Logger
     encounters = %{}
     participants = %{}
+    line_count = 0
+    encounter_lines = 0
     
     result = File.stream!(file_path)
     |> Stream.with_index()
-    |> Enum.reduce({encounters, participants}, fn {line, _index}, {enc_acc, part_acc} ->
-      parse_line(String.trim(line), enc_acc, part_acc)
+    |> Enum.reduce({encounters, participants, line_count, encounter_lines}, fn {line, index}, {enc_acc, part_acc, lines, enc_lines} ->
+      trimmed_line = String.trim(line)
+      
+      # Log first few lines and some sample lines for debugging
+      if index < 5 do
+        Logger.info("Sample line #{index}: #{String.slice(trimmed_line, 0, 200)}")
+      end
+      
+      # Count encounter-related lines
+      new_enc_lines = if String.contains?(trimmed_line, "ENCOUNTER") do
+        enc_lines + 1
+      else
+        enc_lines
+      end
+      
+      {new_enc, new_part} = parse_line(trimmed_line, enc_acc, part_acc)
+      {new_enc, new_part, lines + 1, new_enc_lines}
     end)
     
-    {:ok, result}
+    {encounters, participants, total_lines, encounter_line_count} = result
+    Logger.info("Parsed #{total_lines} lines, found #{encounter_line_count} encounter-related lines")
+    Logger.info("Found #{map_size(encounters)} encounters, #{map_size(participants)} participants")
+    
+    {:ok, {encounters, participants}}
   rescue
     error -> {:error, "Failed to parse file: #{inspect(error)}"}
   end
@@ -62,13 +90,31 @@ defmodule WcLogs.Parser do
   end
 
   defp parse_combat_log_line(line) do
-    # Parse timestamp and event
-    case Regex.run(~r/^(\d{1,2}\/\d{1,2}\/\d{4} \d{1,2}:\d{1,2}:\d{1,2}\.\d{3}) {2}(.+)$/, line) do
-      [_, timestamp_str, event_data] ->
+    # Try multiple timestamp formats common in WoW logs
+    cond do
+      # Format: MM/DD/YYYY HH:MM:SS.mmm-TZ  EVENT_DATA (MoP Classic format)
+      match = Regex.run(~r/^(\d{1,2}\/\d{1,2}\/\d{4} \d{1,2}:\d{1,2}:\d{1,2}\.\d{3}[-+]\d+) {1,}(.+)$/, line) ->
+        [_, timestamp_str, event_data] = match
+        timestamp = parse_timestamp_with_tz(timestamp_str)
+        parse_event(event_data, timestamp)
+      
+      # Format: MM/DD/YYYY HH:MM:SS.mmm  EVENT_DATA (standard)
+      match = Regex.run(~r/^(\d{1,2}\/\d{1,2}\/\d{4} \d{1,2}:\d{1,2}:\d{1,2}\.\d{3}) {2}(.+)$/, line) ->
+        [_, timestamp_str, event_data] = match
         timestamp = parse_timestamp(timestamp_str)
         parse_event(event_data, timestamp)
       
-      _ ->
+      # Format: MM/DD YYYY HH:MM:SS.mmm  EVENT_DATA (alternative)
+      match = Regex.run(~r/^(\d{1,2}\/\d{1,2} \d{4} \d{1,2}:\d{1,2}:\d{1,2}\.\d{3}) {1,}(.+)$/, line) ->
+        [_, timestamp_str, event_data] = match
+        timestamp = parse_timestamp_alt(timestamp_str)
+        parse_event(event_data, timestamp)
+      
+      # Format: Just event data without timestamp (some logs)
+      String.contains?(line, "ENCOUNTER_START") or String.contains?(line, "ENCOUNTER_END") ->
+        parse_event(line, DateTime.utc_now())
+      
+      true ->
         :ignore
     end
   end
@@ -77,6 +123,48 @@ defmodule WcLogs.Parser do
     # Parse MM/DD/YYYY HH:MM:SS.mmm format
     case Regex.run(~r/^(\d{1,2})\/(\d{1,2})\/(\d{4}) (\d{1,2}):(\d{1,2}):(\d{1,2})\.(\d{3})$/, timestamp_str) do
       [_, month, day, year, hour, minute, second, millisecond] ->
+        {:ok, datetime} = NaiveDateTime.new(
+          String.to_integer(year),
+          String.to_integer(month),
+          String.to_integer(day),
+          String.to_integer(hour),
+          String.to_integer(minute),
+          String.to_integer(second),
+          {String.to_integer(millisecond) * 1000, 3}
+        )
+        DateTime.from_naive!(datetime, "Etc/UTC")
+      
+      _ ->
+        DateTime.utc_now()
+    end
+  end
+
+  defp parse_timestamp_alt(timestamp_str) do
+    # Parse MM/DD YYYY HH:MM:SS.mmm format
+    case Regex.run(~r/^(\d{1,2})\/(\d{1,2}) (\d{4}) (\d{1,2}):(\d{1,2}):(\d{1,2})\.(\d{3})$/, timestamp_str) do
+      [_, month, day, year, hour, minute, second, millisecond] ->
+        {:ok, datetime} = NaiveDateTime.new(
+          String.to_integer(year),
+          String.to_integer(month),
+          String.to_integer(day),
+          String.to_integer(hour),
+          String.to_integer(minute),
+          String.to_integer(second),
+          {String.to_integer(millisecond) * 1000, 3}
+        )
+        DateTime.from_naive!(datetime, "Etc/UTC")
+      
+      _ ->
+        DateTime.utc_now()
+    end
+  end
+
+  defp parse_timestamp_with_tz(timestamp_str) do
+    # Parse MM/DD/YYYY HH:MM:SS.mmm-TZ format (e.g., "8/2/2025 19:53:15.877-5")
+    case Regex.run(~r/^(\d{1,2})\/(\d{1,2})\/(\d{4}) (\d{1,2}):(\d{1,2}):(\d{1,2})\.(\d{3})[-+](\d+)$/, timestamp_str) do
+      [_, month, day, year, hour, minute, second, millisecond, _tz] ->
+        # For simplicity, we'll ignore timezone and parse as UTC
+        # In production, you might want to handle timezone properly
         {:ok, datetime} = NaiveDateTime.new(
           String.to_integer(year),
           String.to_integer(month),
@@ -301,32 +389,145 @@ defmodule WcLogs.Parser do
   end
 
   defp update_participant_damage(participants, event_data) do
-    source_key = {event_data.source_guid, event_data.source_name}
-    dest_key = {event_data.dest_guid, event_data.dest_name}
+    # Group pets/minions with their owners and separate players from bosses
+    source_key = get_participant_key(event_data.source_guid, event_data.source_name)
+    dest_key = get_participant_key(event_data.dest_guid, event_data.dest_name)
     
-    participants
-    |> update_participant_stat(source_key, :total_damage_done, event_data.amount)
-    |> update_participant_stat(dest_key, :total_damage_taken, event_data.amount)
+    participants = case source_key do
+      {:player, key} -> update_participant_stat(participants, key, :total_damage_done, event_data.amount)
+      {:boss, key} -> update_boss_stat(participants, key, :total_damage_done, event_data.amount)
+      _ -> participants
+    end
+    
+    case dest_key do
+      {:player, key} -> update_participant_stat(participants, key, :total_damage_taken, event_data.amount)
+      {:boss, key} -> update_boss_stat(participants, key, :total_damage_taken, event_data.amount)
+      _ -> participants
+    end
   end
 
   defp update_participant_healing(participants, event_data) do
-    source_key = {event_data.source_guid, event_data.source_name}
+    source_key = get_participant_key(event_data.source_guid, event_data.source_name)
     
-    update_participant_stat(participants, source_key, :total_healing_done, event_data.amount)
+    case source_key do
+      {:player, key} -> update_participant_stat(participants, key, :total_healing_done, event_data.amount)
+      {:boss, key} -> update_boss_stat(participants, key, :total_healing_done, event_data.amount)
+      _ -> participants
+    end
   end
 
   defp update_participant_death(participants, event_data) do
-    dest_key = {event_data.dest_guid, event_data.dest_name}
+    dest_key = get_participant_key(event_data.dest_guid, event_data.dest_name)
     
-    update_participant_stat(participants, dest_key, :deaths, 1)
+    case dest_key do
+      {:player, key} -> update_participant_stat(participants, key, :deaths, 1)
+      {:boss, key} -> update_boss_stat(participants, key, :deaths, 1)
+      _ -> participants
+    end
+  end
+
+  # Determine if an entity is a player or boss and get the appropriate key
+  defp get_participant_key(guid, name) do
+    cond do
+      is_player?(guid, name) -> {:player, get_player_key(guid, name)}
+      is_boss?(guid, name) -> {:boss, {guid, name}}
+      true -> :unknown
+    end
+  end
+  
+  # Identify players (including pets/minions) vs bosses
+  defp is_player?(guid, name) do
+    # Player GUIDs typically start with "Player-" or contain server names
+    # Pets often have names like "Pet-X-Y" or contain the owner's name
+    cond do
+      String.starts_with?(guid, "Player-") -> true
+      String.contains?(name, "-") && String.contains?(name, "US") -> true
+      String.contains?(name, "-") && String.contains?(name, "EU") -> true
+      is_pet_or_minion?(guid, name) -> true
+      true -> false
+    end
+  end
+  
+  defp is_boss?(guid, name) do
+    # Boss GUIDs typically start with "Creature-" and don't have server suffixes
+    cond do
+      String.starts_with?(guid, "Creature-") && !is_pet_or_minion?(guid, name) -> true
+      String.starts_with?(guid, "Vehicle-") -> true
+      true -> false
+    end
+  end
+  
+  defp is_pet_or_minion?(guid, name) do
+    # Common pet/minion patterns in WoW logs
+    String.contains?(guid, "Pet-") or
+    String.contains?(name, " <") or  # Pet names often have brackets
+    String.contains?(name, "Minion") or
+    String.contains?(name, "Totem") or
+    String.contains?(name, "Spirit") or
+    String.contains?(name, "Elemental")
+  end
+  
+  # Get the main player key, grouping pets with their owners
+  defp get_player_key(guid, name) do
+    if is_pet_or_minion?(guid, name) do
+      # Try to extract owner name from pet name or use a generic grouping
+      owner_name = extract_owner_name(name)
+      {generate_owner_guid(owner_name), owner_name}
+    else
+      {guid, normalize_player_name(name)}
+    end
+  end
+  
+  defp extract_owner_name(pet_name) do
+    # Extract owner name from pet names like "Spirit Wolf <PlayerName>"
+    case Regex.run(~r/<(.+)>/, pet_name) do
+      [_, owner] -> normalize_player_name(owner)
+      _ -> 
+        # If no brackets, try to guess from the first word
+        case String.split(pet_name, " ") do
+          [first_word | _] when byte_size(first_word) > 2 -> 
+            normalize_player_name(first_word)
+          _ -> "Unknown"
+        end
+    end
+  end
+  
+  defp normalize_player_name(name) do
+    # Ensure player names follow PlayerName-Server-Region format
+    cond do
+      String.contains?(name, "-") -> name
+      true -> "#{name}-Unknown-US"  # Default format if no server info
+    end
+  end
+  
+  defp generate_owner_guid(owner_name) do
+    "Player-Generated-#{owner_name}"
+  end
+  
+  defp update_boss_stat(participants, {guid, name}, stat, amount) do
+    # Store boss stats separately from players
+    boss_key = {:boss, guid, name}
+    initial_stats = %{
+      guid: guid,
+      name: name,
+      type: :boss
+    }
+    |> Map.put(stat, amount)
+    
+    Map.update(participants, boss_key, initial_stats, fn participant ->
+      Map.update(participant, stat, amount, &(&1 + amount))
+    end)
   end
 
   defp update_participant_stat(participants, {guid, name}, stat, amount) do
-    Map.update(participants, {guid, name}, %{
+    initial_stats = %{
       guid: guid,
       name: name,
-      stat => amount
-    }, fn participant ->
+      type: :player
+    }
+    |> Map.put(stat, amount)
+    
+    Map.update(participants, {guid, name}, initial_stats, fn participant ->
       Map.update(participant, stat, amount, &(&1 + amount))
     end)
   end
@@ -335,13 +536,28 @@ defmodule WcLogs.Parser do
     guid = combatant_data.guid
     
     # Find participant by GUID and update with combatant info
-    Enum.reduce(participants, participants, fn {{p_guid, name}, participant}, acc ->
-      if p_guid == guid do
-        updated_participant = Map.merge(participant, combatant_data)
-        Map.put(acc, {p_guid, name}, updated_participant)
-      else
+    Enum.reduce(participants, participants, fn
+      # Handle player participants
+      {{p_guid, name}, participant}, acc ->
+        if p_guid == guid do
+          updated_participant = Map.merge(participant, combatant_data)
+          Map.put(acc, {p_guid, name}, updated_participant)
+        else
+          acc
+        end
+      
+      # Handle boss participants  
+      {{:boss, p_guid, name}, participant}, acc ->
+        if p_guid == guid do
+          updated_participant = Map.merge(participant, combatant_data)
+          Map.put(acc, {:boss, p_guid, name}, updated_participant)
+        else
+          acc
+        end
+      
+      # Handle any other key format
+      {_key, _participant}, acc ->
         acc
-      end
     end)
   end
 
@@ -370,7 +586,11 @@ defmodule WcLogs.Parser do
   defp create_participant_records(encounter, participants, encounter_data) do
     duration_seconds = if encounter_data[:duration_ms], do: encounter_data.duration_ms / 1000.0, else: 1.0
     
-    participant_data = participants
+    # Separate players and bosses
+    {players, bosses} = separate_participants(participants)
+    
+    # Create player records
+    player_data = players
     |> Enum.map(fn {{guid, name}, stats} ->
       dps = if duration_seconds > 0, do: (stats[:total_damage_done] || 0) / duration_seconds, else: 0.0
       hps = if duration_seconds > 0, do: (stats[:total_healing_done] || 0) / duration_seconds, else: 0.0
@@ -379,6 +599,7 @@ defmodule WcLogs.Parser do
         encounter_id: encounter.id,
         guid: guid,
         name: name,
+        participant_type: "player",
         total_damage_done: stats[:total_damage_done] || 0,
         total_healing_done: stats[:total_healing_done] || 0,
         total_damage_taken: stats[:total_damage_taken] || 0,
@@ -386,15 +607,48 @@ defmodule WcLogs.Parser do
         hps: Float.round(hps, 2),
         deaths: stats[:deaths] || 0,
         item_level: stats[:item_level],
-        inserted_at: DateTime.utc_now(),
-        updated_at: DateTime.utc_now()
+        inserted_at: DateTime.utc_now() |> DateTime.truncate(:second),
+        updated_at: DateTime.utc_now() |> DateTime.truncate(:second)
       }
     end)
     
-    if length(participant_data) > 0 do
-      Reports.create_participants(participant_data)
+    # Create boss records  
+    boss_data = bosses
+    |> Enum.map(fn {{:boss, guid, name}, stats} ->
+      dps = if duration_seconds > 0, do: (stats[:total_damage_done] || 0) / duration_seconds, else: 0.0
+      hps = if duration_seconds > 0, do: (stats[:total_healing_done] || 0) / duration_seconds, else: 0.0
+      
+      %{
+        encounter_id: encounter.id,
+        guid: guid,
+        name: name,
+        participant_type: "boss",
+        total_damage_done: stats[:total_damage_done] || 0,
+        total_healing_done: stats[:total_healing_done] || 0,
+        total_damage_taken: stats[:total_damage_taken] || 0,
+        dps: Float.round(dps, 2),
+        hps: Float.round(hps, 2),
+        deaths: stats[:deaths] || 0,
+        item_level: nil,
+        inserted_at: DateTime.utc_now() |> DateTime.truncate(:second),
+        updated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+      }
+    end)
+    
+    all_data = player_data ++ boss_data
+    
+    if length(all_data) > 0 do
+      Reports.create_participants(all_data)
     else
       {:ok, []}
     end
+  end
+  
+  defp separate_participants(participants) do
+    Enum.split_with(participants, fn
+      {{_guid, _name}, stats} -> Map.get(stats, :type) == :player
+      {{:boss, _guid, _name}, _stats} -> false
+      _ -> true
+    end)
   end
 end

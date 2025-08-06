@@ -16,6 +16,11 @@ defmodule WcLogsWeb.Endpoint do
     gzip: false,
     only: WcLogsWeb.static_paths()
 
+  plug Plug.Static,
+    at: "/static",
+    from: {:wc_logs, "priv/static"},
+    gzip: false
+
   if code_reloading? do
     socket "/phoenix/live_reload/socket", Phoenix.LiveReloader.Socket
     plug Phoenix.LiveReloader
@@ -33,7 +38,10 @@ defmodule WcLogsWeb.Endpoint do
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
-    json_decoder: Phoenix.json_library()
+    json_decoder: Phoenix.json_library(),
+    length: 1_000_000_000,
+    read_length: 1_000_000_000,
+    read_timeout: 120_000
 
   plug Plug.MethodOverride
   plug Plug.Head

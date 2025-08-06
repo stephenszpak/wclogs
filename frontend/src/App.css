@@ -191,6 +191,47 @@ main {
   margin: 20px 0;
 }
 
+.filter-section {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 15px;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.filter-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 14px;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.filter-input:focus {
+  border-color: #007bff;
+  outline: 0;
+  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+.clear-filter {
+  background: #6c757d;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background-color 0.15s ease-in-out;
+}
+
+.clear-filter:hover {
+  background: #5a6268;
+}
+
 .participants-tabs {
   display: flex;
   border-bottom: 2px solid #ddd;
@@ -238,6 +279,37 @@ main {
   color: #333;
 }
 
+.participants-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s ease;
+}
+
+.participants-table th.sortable:hover {
+  background: #e9ecef;
+}
+
+.sort-icon {
+  margin-left: 8px;
+  color: #adb5bd;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.sort-icon.active {
+  color: #007bff;
+  opacity: 1;
+}
+
+.participant-row {
+  transition: all 0.2s ease;
+}
+
+.participant-row:hover {
+  background: #f8f9fa;
+  transform: translateX(2px);
+}
+
 .participants-table tr:hover {
   background: #f8f9fa;
 }
@@ -247,8 +319,14 @@ main {
 }
 
 .participant-class {
-  color: #666;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.participant-spec {
+  font-size: 11px;
+  font-style: italic;
+  margin-top: 2px;
 }
 
 .damage-bar {
@@ -257,16 +335,33 @@ main {
   border-radius: 10px;
   overflow: hidden;
   margin: 5px 0;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.damage-bar-mini {
+  background: #e9ecef;
+  height: 12px;
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 2px 0;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
 }
 
 .damage-bar-fill {
   height: 100%;
   background: linear-gradient(90deg, #007bff, #0056b3);
   transition: width 0.3s ease;
+  box-shadow: 0 1px 2px rgba(0,123,255,0.3);
 }
 
 .heal-bar-fill {
   background: linear-gradient(90deg, #28a745, #218838);
+  box-shadow: 0 1px 2px rgba(40,167,69,0.3);
+}
+
+.deaths-indicator.has-deaths {
+  color: #dc3545;
+  font-weight: bold;
 }
 
 .number-large {

@@ -30,10 +30,18 @@ if config_env() == :prod do
   port = String.to_integer(System.get_env("PORT") || "4000")
 
   config :wc_logs, WcLogsWeb.Endpoint,
-    url: [host: host, port: 443, scheme: "https"],
+    url: [host: host, port: port, scheme: "http"],
     http: [
-      ip: {0, 0, 0, 0, 0, 0, 0, 0},
-      port: port
+      ip: {0, 0, 0, 0},
+      port: port,
+      protocol_options: [
+        max_request_line_length: 8192,
+        max_header_name_length: 64,
+        max_header_value_length: 4096,
+        max_headers: 100,
+        max_body_length: 1_000_000_000,
+        request_timeout: 120_000
+      ]
     ],
     secret_key_base: secret_key_base
 end
